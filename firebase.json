@@ -5,6 +5,10 @@
   },
   "functions": [
     {
+      "runtimeOptions": {
+        "memory": "1GB",
+        "timeoutSeconds": 300
+      },
       "source": "functions",
       "codebase": "default",
       "ignore": [

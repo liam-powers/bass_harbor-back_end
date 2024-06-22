@@ -1,4 +1,4 @@
-interface UprightBassListing {
+export interface UprightBassListing {
     title?: string;
     imgLink: string;
     listingLink?: string;
@@ -8,5 +8,3 @@ interface UprightBassListing {
     year?: number;
     maker?: string;
 }
-
-export default UprightBassListing;

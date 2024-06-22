@@ -1,25 +1,17 @@
-import { initializeApp, cert } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
-import cors from 'cors';
-import { onRequest } from 'firebase-functions/v2/https';
+const { initializeApp } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
+// const cors = require('cors');
+const { onRequest } = require('firebase-functions/v2/https');
+const scrapeData = require("./helpers/webscrape");
+const firebaseConfig = require('../firebaseConfig.json');
 
-import scrapeDataHelper from "./helpers/webscrape";
-import firebaseConfig from '../firebaseConfig.json';
-
-const app = initializeApp(firebaseConfig);
+initializeApp(firebaseConfig); //TODO: may need to save this as an app variable later.
 const db = getFirestore();
+
 db.settings({ ignoreUndefinedProperties: true });
 
-interface FirestoreUprightBassListing {
-    title?: string;
-    imgLink: string;
-    listingLink?: string;
-    location?: string;
-    saleStatus?: string;
-    price?: string;
-    year?: number;
-    maker?: string;
-}
+import type { UprightBassListing } from './interfaces/UprightBassListing';
+
 // query FireStore data for filtered listings as request from the front end.
 exports.fetchListings = onRequest(
     { cors: true },
@@ -28,9 +20,9 @@ exports.fetchListings = onRequest(
         // const filters = req.data;
         // const q = query(uprightRef)
         const snapshot = await db.collection('upright').get();
-        let uprightListings: FirestoreUprightBassListing[] = [];
+        let uprightListings: UprightBassListing[] = [];
         snapshot.forEach((doc: any) => {
-            uprightListings.push(doc.data() as FirestoreUprightBassListing);
+            uprightListings.push(doc.data() as UprightBassListing);
         });
     }
 );
@@ -42,16 +34,18 @@ exports.scrapeAndAdd = onRequest(
     { cors: true },
     async (req: any, res: any) => {
         try {
-            let uprightListings: FirestoreUprightBassListing[] = [];
+            console.log("Now inside scrapeAndAdd function...");
+            let uprightListings: UprightBassListing[] = [];
 
             let scrapeObject = {
                 talkBass: true,
+                scrapeBassChatData: false,
             };
-            uprightListings = await scrapeDataHelper(scrapeObject);
-            addNewListings(uprightListings, 'upright');
-            res.set('Access-Control-Allow-Origin', 'http://localhost:3000'); // TODO: change localhost:3000 to actual destination during production
-            res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-            res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+            uprightListings = await scrapeData(scrapeObject);
+            console.log("uprightListings: ", uprightListings);
+            // console.log("sample uprightListing: ", uprightListings[0]);
+            addNewListings(uprightListings);
             res.json(uprightListings);
         } catch (error) {
             console.error("Error fetching upright bass listings:", error);
@@ -61,13 +55,18 @@ exports.scrapeAndAdd = onRequest(
 );
 
 // helper functions for scrapeAndAdd
-async function addNewListings(listings: any, listingsType: any) {
+async function addNewListings(listings: UprightBassListing[]) {
     // let listingsRef: any = db.collection(listingsType);
 
     for (const listingData of listings) {
         try {
+            if (!listingData.title) {
+                console.log("No title for this listing, skipping...");
+                continue;
+            }
             const sanitizedTitle = listingData.title.replace(/[\/]/g, '-');
-            await db.collection('/' + listingsType).doc(sanitizedTitle).set(listingData);
+
+            await db.collection('/upright').doc(sanitizedTitle).set(listingData);
             console.log("Added listing for a ", listingData.title, " to the FireStore!");
         } catch (error) {
             console.log("Error adding listing: ", error);
