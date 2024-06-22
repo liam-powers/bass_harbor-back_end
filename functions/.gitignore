@@ -10,4 +10,4 @@ node_modules/
 *.local
 
 # Secrets
-firebaseConfig.json
+*firebaseConfig.json
