@@ -38,13 +38,13 @@ exports.scrapeAndAdd = onRequest(
             let uprightListings: UprightBassListing[] = [];
 
             let scrapeObject = {
-                talkBass: true,
-                scrapeBassChatData: false,
+                talkBass: false,
+                scrapeBassChatData: true,
             };
 
             uprightListings = await scrapeData(scrapeObject);
-            console.log("uprightListings: ", uprightListings);
-            // console.log("sample uprightListing: ", uprightListings[0]);
+            // console.log("uprightListings: ", uprightListings);
+            console.log("sample uprightListing: ", uprightListings[0]);
             addNewListings(uprightListings);
             res.json(uprightListings);
         } catch (error) {
@@ -56,7 +56,7 @@ exports.scrapeAndAdd = onRequest(
 
 // helper functions for scrapeAndAdd
 async function addNewListings(listings: UprightBassListing[]) {
-    // let listingsRef: any = db.collection(listingsType);
+    console.log("inside addListings");
 
     for (const listingData of listings) {
         try {
@@ -67,7 +67,7 @@ async function addNewListings(listings: UprightBassListing[]) {
             const sanitizedTitle = listingData.title.replace(/[\/]/g, '-');
 
             await db.collection('/upright').doc(sanitizedTitle).set(listingData);
-            console.log("Added listing for a ", listingData.title, " to the FireStore!");
+            // console.log("Added listing for a ", listingData.title, " to the FireStore!");
         } catch (error) {
             console.log("Error adding listing: ", error);
         };
