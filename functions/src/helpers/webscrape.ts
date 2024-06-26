@@ -2,23 +2,10 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { UprightBassListing } from '../interfaces/UprightBassListing';
 
-puppeteer.use(StealthPlugin());
-
-// webscrape.ts (called during GET requests):
-let browser: any;
-
-async function initializeBrowser() {
-  browser = await puppeteer.launch({
-    headless: true,
-    defaultViewport: null,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
-}
-
 let objList: UprightBassListing[] = [];
 
 async function scrapeData(toScrape: { talkBass?: boolean, scrapeBassChatData?: boolean, scrapeReverbData?: boolean }) {
-  await initializeBrowser();
+
   if (toScrape.talkBass === true) { // scrape TalkBass data
     console.log("scraping talkbass data...");
     await scrapeTalkBassData();
@@ -34,12 +21,25 @@ async function scrapeData(toScrape: { talkBass?: boolean, scrapeBassChatData?: b
     await scrapeReverbData();
   }
 
-  await browser.close();
   console.log("browser closed");
   return objList;
 };
 
 async function scrapeTalkBassData() {
+  puppeteer.use(StealthPlugin());
+
+  // webscrape.ts (called during GET requests):
+  let browser: any;
+
+  async function initializeBrowser() {
+    browser = await puppeteer.launch({
+      headless: true,
+      defaultViewport: null,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+  }
+
+  await initializeBrowser();
   const page = await browser.newPage();
   //TODO: Get higher quality pictures from source
 
@@ -48,7 +48,7 @@ async function scrapeTalkBassData() {
   numPages = parseInt(numPages);
   console.log("number of pages obtained to be: ", numPages);
 
-  for (let i = 1; i <= numPages; i++) { // TODO: change numPages to 2 for testing.
+  for (let i = 1; i <= 3; i++) { // TODO: change numPages to numPages for production.
     await page.goto(`https://www.talkbass.com/forums/for-sale-double-basses.144/page-${i}?prefix_id=1`);
     await page.waitForSelector('.discussionListItems .discussionListItem.visible.prefix1');
     const bassListings = await page.$$(`.discussionListItems .discussionListItem.visible.prefix1`);
@@ -97,18 +97,24 @@ async function scrapeTalkBassData() {
   }
 
   console.log("\n\n\n ***** Reached end of scrapeTalkBassData function *****");
-
-  return;
+  await browser.close();
 };
 
 async function scrapeBassChatData() {
+  // webscrape.ts (called during GET requests):
+  let browser: any;
+
+  async function initializeBrowser() {
+    browser = await puppeteer.launch({
+      headless: true,
+      defaultViewport: null,
+    });
+  }
+
+  await initializeBrowser();
   const page = await browser.newPage();
   await page.goto('https://www.basschat.co.uk/forum/76-eubs-double-basses-for-sale/');
 
-  /*
-  await page.waitForSelector('.discussionListItems .discussionListItem.visible.prefix1');
-  const bassListings = await page.$$(`.discussionListItems .discussionListItem.visible.prefix1`);
-*/
   const pageJumpCSSPath = ".ipsPagination_pageJump > a";
   await page.waitForSelector(pageJumpCSSPath);
   const pageOfPageText = await page.$(pageJumpCSSPath).then((el: any) => el?.evaluate((el: any) => el.textContent));
@@ -119,8 +125,9 @@ async function scrapeBassChatData() {
 
   const itemCSSPath = ".ipsClear.ipsDataList.cForumTopicTable.cTopicList > .ipsDataItem.ipsDataItem_responsivePhoto";
 
-  for (let pageNum = 1; pageNum <= 2; pageNum++) {
-    await page.goto(`https://www.basschat.co.uk/forum/76-eubs-double-basses-for-sale/page/${pageNum}/`);
+  for (let pageNum = 1; pageNum <= 1; pageNum++) { // TODO: change to numPages for production
+    const listingsPageLink = `https://www.basschat.co.uk/forum/76-eubs-double-basses-for-sale/page/${pageNum}/`;
+    await page.goto(listingsPageLink);
     await page.waitForSelector(itemCSSPath);
     const bassListings = await page.$$(itemCSSPath);
 
@@ -131,6 +138,7 @@ async function scrapeBassChatData() {
       threadNum += 1;
       if ((threadNum == 1 && pageNum == 1) || (threadNum == 2 && pageNum == 1)) {
         // We're at the sticky threads which we want to skip (terms of conditions, advice for buyers and sellers)
+        console.log("@@@@@@ INSIDE A STICKY THREAD, SKIPPING @@@@@@");
         continue;
       }
 
@@ -149,19 +157,26 @@ async function scrapeBassChatData() {
       const titleElement = await thread.$(relativeTitleCSSPath);
 
       if (!titleElement) {
-        console.log("@@@@@@@@ titleElement not found inside scrapeBassChatData! @@@@@@@@");
+        // console.log("@@@@@@@@ titleElement not found inside scrapeBassChatData! @@@@@@@@");
         continue;
       }
 
-      obj.title = await titleElement.evaluate((el: { textContent: any; }) => el.textContent);
+      const uncleanTitle = await titleElement.evaluate((el: { textContent: any; }) => el.textContent);
+
+      if (!uncleanTitle) {
+        // console.log("bass listing title not found!");
+        continue;
+      }
+
+      obj.title = uncleanTitle.replace(/[\t\n]/g, '').trim();
 
       if (!obj.title) {
-        console.log("bass listing title not found!");
+        // console.log("bass listing title is empty, skipping...");
         continue;
       }
       
       if (!availableFromTextBool(obj.title)) {
-        console.log("bass listing is not available, skipping...");
+        // console.log("bass listing is not available, skipping...");
         continue;
       }
 
@@ -169,41 +184,59 @@ async function scrapeBassChatData() {
       obj.saleStatus = "Available";
       obj.listingLink = await titleElement.evaluate((el: { href: any; }) => el.href);
 
-      try {
-        await page.goto(obj.listingLink);
-        console.log("went into object listing!");
-      }
-      catch (error) {
-        console.log("Error going into object listing: ", error);
+
+      const listingPage = await browser.newPage();
+      await listingPage.goto(obj.listingLink);
+
+      // Now inside the listing's page itself.
+
+      // console.log("listingPage we're at:", listingPage.url());
+
+      const priceElement = await listingPage.$eval('h1.ipsType_pageTitle', (el: { childNodes: Iterable<unknown> | ArrayLike<unknown>; }) => {
+        const priceNode = Array.from(el.childNodes).find((node: any) => 
+          node.nodeType === Node.TEXT_NODE && node.textContent.includes('£')
+        );
+        return priceNode;
+      });
+      
+      // Select the element containing the location
+      const locationElement = await listingPage.$eval('h1.ipsType_pageTitle', (el: { childNodes: Iterable<unknown> | ArrayLike<unknown>; }) => {
+        const locationNode = Array.from(el.childNodes).find((node: any) => 
+          node.nodeType === Node.TEXT_NODE && !node.textContent.includes('£')
+        );
+        return locationNode;
+      });
+      
+      if (!priceElement || !locationElement) {
+        // console.log("price or location not found, skipping...");
         continue;
       }
-      
-      // TODO: maybe set a timeout here?
 
-      const listingInfoCSSSelector = ".ipsType_pageTitle.ipsContained_container > br";
-      console.log("waiting for listingInfoCSSSelector...");
-      await page.waitForSelector(listingInfoCSSSelector);
+      obj.price = cleanPriceHelper(priceElement);
+      obj.location = locationElement;
       
-      console.log("found listingInfoCSSSelector! now selecting price and location...");
-      const priceThenLocation = await page.$$(listingInfoCSSSelector);
-      
-      console.log("found priceThenLocation! now evaluating... ");
-      obj.price = cleanPriceHelper(await priceThenLocation[0].evaluate((el: { textContent: any; }) => el.textContent));
-      obj.location = (await priceThenLocation[1].evaluate((el: { textContent: any; }) => el.textContent)) + ", United Kingdom";
-
-      console.log("price and location:", obj.price, obj.location);
-
-      console.log("now finding image CSS path");
+      // console.log("now finding image CSS path");
       const imageCSSPath = ".ipsImage.ipsImage_thumbnailed";
-      await page.waitForSelector(imageCSSPath);
 
-      console.log("now grabbing image link...");
-      obj.imgLink = await thread.$eval(imageCSSPath, (el: { src: any; }) => el.src);
+      try {
+        await listingPage.waitForSelector(imageCSSPath, { timeout: 1000 });
+      }
+      catch (error) {
+        // console.log("image for listing not found, skipping...");
+        continue;
+      }
 
-      console.log("pushing object to objList...");
+      // console.log("now grabbing image link...");
+      obj.imgLink = await listingPage.$eval(imageCSSPath, (el: { src: any; }) => el.src);
+
+      // console.log("pushing object to objList...");
       objList.push(obj)
+
+      await listingPage.close();
     }
   }
+
+  await browser.close();
 };
 
 async function scrapeReverbData() {
@@ -212,7 +245,7 @@ async function scrapeReverbData() {
 }
 
 function cleanPriceHelper(price: string | number) {
-  price = String(price).replace(/\$/g, '').replace(/\.\d+/, '').replace(/\./, '').replace(/k/g, '000');
+  price = String(price).replace(/\$/g, '').replace(/\£/g, '').replace(/\.\d+/, '').replace(/\./, '').replace(/k/g, '000');
   price = parseInt(price);
   if (isNaN(price)) {
     price = 0;

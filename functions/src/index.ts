@@ -16,16 +16,58 @@ import type { UprightBassListing } from './interfaces/UprightBassListing';
 exports.fetchListings = onRequest(
     { cors: true },
     async (req: any, res: any) => {
-        // const uprightRef = collection(db, 'upright');
-        // const filters = req.data;
-        // const q = query(uprightRef)
-        const snapshot = await db.collection('upright').get();
-        let uprightListings: UprightBassListing[] = [];
-        snapshot.forEach((doc: any) => {
-            uprightListings.push(doc.data() as UprightBassListing);
-        });
+        try {
+            const { priceRange, keywords, carved, hybrid, plywood } = req.body;
+            let uprightRef = db.collection('upright');
+            let queryRef = uprightRef;
+
+            // Apply price range filter
+            if (priceRange && priceRange.length === 2) {
+                queryRef = queryRef.where('price', '>=', priceRange[0]);
+                queryRef = queryRef.where('price', '<=', priceRange[1]);
+            }
+
+            // Fetch documents with initial filters
+            const snapshot = await queryRef.get();
+            let uprightListings: UprightBassListing[] = [];
+
+            snapshot.forEach((doc: any) => {
+                let data = doc.data() as UprightBassListing;
+
+                // Apply additional filters
+                let matchKeywords = true;
+                if (keywords && keywords.length > 0) {
+                    matchKeywords = keywords.every((keyword: string) => (data.title ?? "").toLowerCase().includes(keyword.toLowerCase()));
+                }
+
+                let matchCarved = true;
+                if (carved) {
+                    matchCarved = (data.title ?? "").toLowerCase().includes('carved');
+                }
+
+                let matchHybrid = true;
+                if (hybrid) {
+                    matchHybrid = (data.title ?? "").toLowerCase().includes('hybrid');
+                }
+
+                let matchPlywood = true;
+                if (plywood) {
+                    matchPlywood = (data.title ?? "").toLowerCase().includes('plywood');
+                }
+
+                if (matchKeywords && matchCarved && matchHybrid && matchPlywood) {
+                    uprightListings.push(data);
+                }
+            });
+
+            res.status(200).json(uprightListings);
+        } catch (error) {
+            console.error("Error fetching upright bass listings:", error);
+            res.status(500).send("Internal server error");
+        }
     }
 );
+
 
 
 // scrape data from various bass sales website and add them to the FireStore.
@@ -38,7 +80,7 @@ exports.scrapeAndAdd = onRequest(
             let uprightListings: UprightBassListing[] = [];
 
             let scrapeObject = {
-                talkBass: false,
+                talkBass: true,
                 scrapeBassChatData: true,
             };
 
