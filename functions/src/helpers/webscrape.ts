@@ -124,6 +124,7 @@ async function scrapeBassChatData() {
   console.log("number of pages obtained to be: ", numPages);
 
   const itemCSSPath = ".ipsClear.ipsDataList.cForumTopicTable.cTopicList > .ipsDataItem.ipsDataItem_responsivePhoto";
+  const listingPage = await browser.newPage();
 
   for (let pageNum = 1; pageNum <= 1; pageNum++) { // TODO: change to numPages for production
     const listingsPageLink = `https://www.basschat.co.uk/forum/76-eubs-double-basses-for-sale/page/${pageNum}/`;
@@ -174,7 +175,7 @@ async function scrapeBassChatData() {
         // console.log("bass listing title is empty, skipping...");
         continue;
       }
-      
+
       if (!availableFromTextBool(obj.title)) {
         // console.log("bass listing is not available, skipping...");
         continue;
@@ -184,58 +185,39 @@ async function scrapeBassChatData() {
       obj.saleStatus = "Available";
       obj.listingLink = await titleElement.evaluate((el: { href: any; }) => el.href);
 
-
-      const listingPage = await browser.newPage();
       await listingPage.goto(obj.listingLink);
 
       // Now inside the listing's page itself.
 
-      // console.log("listingPage we're at:", listingPage.url());
+      console.log("listingPage we're at:", listingPage.url());
 
-      const priceElement = await listingPage.$eval('h1.ipsType_pageTitle', (el: { childNodes: Iterable<unknown> | ArrayLike<unknown>; }) => {
-        const priceNode = Array.from(el.childNodes).find((node: any) => 
-          node.nodeType === Node.TEXT_NODE && node.textContent.includes('£')
-        );
-        return priceNode;
-      });
-      
-      // Select the element containing the location
-      const locationElement = await listingPage.$eval('h1.ipsType_pageTitle', (el: { childNodes: Iterable<unknown> | ArrayLike<unknown>; }) => {
-        const locationNode = Array.from(el.childNodes).find((node: any) => 
-          node.nodeType === Node.TEXT_NODE && !node.textContent.includes('£')
-        );
-        return locationNode;
-      });
-      
-      if (!priceElement || !locationElement) {
-        // console.log("price or location not found, skipping...");
-        continue;
-      }
+      const containerText = await listingPage.$eval('.ipsType_pageTitle.ipsContained_container', (el: HTMLElement) => el.innerHTML);
+      console.log("container:", containerText);
 
-      obj.price = cleanPriceHelper(priceElement);
-      obj.location = locationElement;
-      
+      const containerArray = containerText.split("<br>", 3);
+      console.log("containerArray:", containerArray);
+
+      const price = cleanPriceHelper(containerArray[1].trim());
+      const location = containerArray[2].trim();
+
+      console.log("price:", price);
+      console.log("location:", location);
+
+      obj.price = price;
+      obj.location = location;
+
       // console.log("now finding image CSS path");
       const imageCSSPath = ".ipsImage.ipsImage_thumbnailed";
-
-      try {
-        await listingPage.waitForSelector(imageCSSPath, { timeout: 1000 });
-      }
-      catch (error) {
-        // console.log("image for listing not found, skipping...");
-        continue;
-      }
 
       // console.log("now grabbing image link...");
       obj.imgLink = await listingPage.$eval(imageCSSPath, (el: { src: any; }) => el.src);
 
       // console.log("pushing object to objList...");
       objList.push(obj)
-
-      await listingPage.close();
     }
   }
 
+  await listingPage.close();
   await browser.close();
 };
 
