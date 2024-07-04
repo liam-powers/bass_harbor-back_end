@@ -16,11 +16,6 @@ async function scrapeData(toScrape: { talkBass?: boolean, scrapeBassChatData?: b
     await scrapeBassChatData();
   }
 
-  if (toScrape.scrapeReverbData === true) { // scrape Reverb data
-    console.log("scraping reverb data...");
-    await scrapeReverbData();
-  }
-
   console.log("browser closed");
   return objList;
 };
@@ -33,25 +28,44 @@ async function scrapeTalkBassData() {
 
   async function initializeBrowser() {
     browser = await puppeteer.launch({
-      headless: true,
+      headless: false,
       defaultViewport: null,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-accelerated-2d-canvas', '--disable-gpu'],
     });
   }
 
   await initializeBrowser();
   const page = await browser.newPage();
-  //TODO: Get higher quality pictures from source
 
-  await page.goto('https://www.talkbass.com/forums/for-sale-double-basses.144/?prefix_id=1');
-  let numPages = await page.$eval("#content > div > div > div.mainContainer > div > div:nth-child(6) > div.PageNav > nav > a:nth-child(5)", (el: { textContent: any; }) => el.textContent)
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+  
+  await page.setViewport({
+    width: 1920,
+    height: 1080,
+  });
+
+  await page.goto('https://www.talkbass.com/forums/for-sale-double-basses.144/?prefix_id=1', {
+    waitUntil: 'networkidle2',
+    timeout: 60000,
+  });
+
+  let numPages = await page.$$eval(".pageNav-page", (elements: any) => {
+    const matchingElement = elements.find((el: HTMLElement) => el.classList.length === 1);
+    return matchingElement ? matchingElement.textContent : null;
+  });
+  console.log("retrieved numPages:", numPages);
   numPages = parseInt(numPages);
-  console.log("number of pages obtained to be: ", numPages);
+  console.log("parseInt'd number of pages obtained to be: ", numPages);
 
-  for (let i = 1; i <= 3; i++) { // TODO: change numPages to numPages for production.
+  let talkBassObjs: UprightBassListing[] = [];
+
+  for (let i = 1; i <= 1; i++) { // TODO: change numPages to numPages for production.
     await page.goto(`https://www.talkbass.com/forums/for-sale-double-basses.144/page-${i}?prefix_id=1`);
-    await page.waitForSelector('.discussionListItems .discussionListItem.visible.prefix1');
-    const bassListings = await page.$$(`.discussionListItems .discussionListItem.visible.prefix1`);
+    console.log("now at page:", page.url());
+    const pageContent = await page.content();
+    console.log(pageContent.slice(0, 60));
+    await page.waitForSelector('.block-container');
+    const bassListings = await page.$$(`.structItem.structItem--ad`);
 
     console.log(`num bass listings found in page ${i} = ${bassListings.length}`);
 
@@ -66,37 +80,39 @@ async function scrapeTalkBassData() {
         listingLink: ""
       };
 
-      obj.title = await thread.$eval('.PreviewTooltip', (el: { textContent: any; }) => el.textContent);
-      const imgRef = await thread.$eval('div.listBlock.posterAvatar > span > a > img', (el: { style: { getPropertyValue: (arg0: string) => any; }; }) => el.style.getPropertyValue('background-image'))
-      obj.imgLink = 'https://www.talkbass.com/' + imgRef.slice(5, (imgRef.length - 2));
-      obj.listingLink = await thread.$eval('div.listBlock.posterAvatar > span > a', (el: { href: any; }) => el.href);
+      obj.title = await thread.$eval('.structItem-title a[data-tp-primary="on"]', (el: HTMLElement) => el.textContent?.trim());
+      console.log("title:", obj.title);
 
-      try {
-        obj.location = await thread.$eval('div > div > div.pairsInline > dl:nth-child(3) > dd', (el: { innerText: any; }) => el.innerText)
-      }
-      catch (error) {
-        obj.location = "location not found";
-      }
+      const relativeListingLink = await thread.$eval('.structItem-title a[data-tp-primary="on"]', (el: HTMLElement) => el.getAttribute('href'));
+      obj.listingLink = "https://www.talkbass.com" + relativeListingLink.trim();
 
-      obj.saleStatus = await thread.$eval('div > h3 > a.prefixLink > span', (el: { innerText: any; }) => el.innerText);
+      console.log("listingLink:", obj.listingLink);
 
-      try {
-        let price = await thread.$eval('div > div > div.pairsInline > dl:nth-child(1) > dd > big > span', (el: { innerText: any; }) => el.innerText);
-        obj.price = cleanPriceHelper(price);
-      }
-      catch (error) {
-        obj.price = 0;
-      }
+      obj.saleStatus = "Available";
 
       if (obj.title) {
         obj.year = searchTextForYearHelper(obj.title);
       }
-
-      objList.push(obj)
+      talkBassObjs.push(obj)
     }
   }
 
+  for (let obj of talkBassObjs) {
+    await page.goto(obj.listingLink);
+    console.log("listing page we're at:", page.url());
+
+    const uncleanPrice = await page.$eval('.casHeader-price', (el: HTMLElement) => el.textContent?.trim() || "");
+    console.log("uncleanPrice:", uncleanPrice);
+
+    obj.price = cleanPriceHelper(uncleanPrice);
+    obj.location = await page.$eval('.adBody-fields.adBody-fields--header dd', (el: HTMLElement) => el.textContent?.trim() || "");
+    obj.imgLink = await page.$eval('.js-adImage', (el: { src: any; }) => el.src || "");
+
+    console.log("obj:", obj);
+  }
+
   console.log("\n\n\n ***** Reached end of scrapeTalkBassData function *****");
+
   await browser.close();
 };
 
@@ -158,26 +174,22 @@ async function scrapeBassChatData() {
       const titleElement = await thread.$(relativeTitleCSSPath);
 
       if (!titleElement) {
-        // console.log("@@@@@@@@ titleElement not found inside scrapeBassChatData! @@@@@@@@");
         continue;
       }
 
       const uncleanTitle = await titleElement.evaluate((el: { textContent: any; }) => el.textContent);
 
       if (!uncleanTitle) {
-        // console.log("bass listing title not found!");
         continue;
       }
 
       obj.title = uncleanTitle.replace(/[\t\n]/g, '').trim();
 
       if (!obj.title) {
-        // console.log("bass listing title is empty, skipping...");
         continue;
       }
 
       if (!availableFromTextBool(obj.title)) {
-        // console.log("bass listing is not available, skipping...");
         continue;
       }
 
@@ -221,19 +233,30 @@ async function scrapeBassChatData() {
   await browser.close();
 };
 
-async function scrapeReverbData() {
-  // https://reverb.com/marketplace?category=upright-bass&product_type=band-and-orchestra
-  return null;
-}
-
 function cleanPriceHelper(price: string | number) {
-  price = String(price).replace(/\$/g, '').replace(/\£/g, '').replace(/\.\d+/, '').replace(/\./, '').replace(/k/g, '000');
+  price = String(price);
+
+  // remove currency symbols
+  price = price.replace(/[\$£]/g, '');
+
+  // remove decimal and tenths + hundredths place
+  price = price.replace(/\.\d+/, '');
+
+  // remove commas
+  price = price.replace(/,/g, '');
+
+  // k -> 000
+  price = price.replace(/k/g, '000');
+
   price = parseInt(price);
+
+  // check if NaN (hopefully not :) )
   if (isNaN(price)) {
     price = 0;
   }
+
   return price;
-};
+}
 
 function searchTextForYearHelper(text: string) {
   let yearRegex = /\d+/g; // regex to find instance of a numeric value for year in object title div

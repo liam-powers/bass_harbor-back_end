@@ -80,8 +80,8 @@ exports.scrapeAndAdd = onRequest(
             let uprightListings: UprightBassListing[] = [];
 
             let scrapeObject = {
-                talkBass: false,
-                scrapeBassChatData: true,
+                talkBass: true,
+                scrapeBassChatData: false,
             };
 
             uprightListings = await scrapeData(scrapeObject);
